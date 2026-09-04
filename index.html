@@ -141,7 +141,8 @@
 <div class="space-y-2">
 <div class="relative">
 <label class="text-xs font-bold">STATUS *:</label>
-<select id="status" class="w-full p-3 border-2 rounded text-sm font-bold bg-yellow-50"><option value="">STATUS *</option><option>Successful</option><option>Unsuccessfull</option><option>Not Traced</option><option>Shifted</option><option>Expired</option><option>Not Visited</option></select>
+<select id="status" class="w-full p-3 border-2 rounded text-sm font-bold bg-yellow-50" onchange="handleStatusChange()"><option value="">STATUS *</option><option>Successful</option><option>Unsuccessfull</option><option>Not Traced</option><option>Shifted</option><option>Expired</option><option>Not Visited</option><option>Incomplete Address</option><option>Short Address</option><option>Wrong Region Outside Boundaries</option></select>
+<div id="difficultTerritoryMsg" class="hidden mt-2 p-2 bg-orange-100 border-2 border-orange-500 rounded text-xs font-bold text-orange-700"></div>
 <span id="tick_status" class="hidden tick-badge">✓</span>
 </div>
 
@@ -389,7 +390,102 @@ function showCard(row){
   checkForm();
 }
 
+
+function isAddressIncomplete(){
+  let addr = document.getElementById('address').textContent || '';
+  addr = addr.trim();
+  // short address detection: less than 30 chars or less than 4 words
+  let words = addr.split(/\s+/).filter(w=>w.length>0);
+  return addr.length < 30 || words.length < 4 || addr.toUpperCase().includes('SHORT') || addr.toUpperCase().includes('INCOMPLETE');
+}
+
+function handleStatusChange(){
+  let statusVal = document.getElementById('status').value;
+  let addrIncomplete = isAddressIncomplete();
+  let difficultStatuses = ['Incomplete Address','Short Address','Wrong Region Outside Boundaries'];
+  let isDifficult = difficultStatuses.includes(statusVal) || (addrIncomplete && statusVal !== 'Successful');
+  
+  let msgDiv = document.getElementById('difficultTerritoryMsg');
+  let fieldsToToggle = ['teacherApproached','personContacted','castVote','conveyance','locationPic','mobileNo','contactDate'];
+  
+  if(isDifficult){
+    // Show message
+    if(msgDiv){
+      msgDiv.classList.remove('hidden');
+      let reason = addrIncomplete ? `Address is incomplete/short (${document.getElementById('address').textContent.trim().length} chars) - Short/Incomplete Address detected` : `Status: ${statusVal}`;
+      msgDiv.innerHTML = `⚠️ <b>${statusVal || 'Short/Incomplete Address'}</b><br>${reason}<br>✅ Other 7 columns auto-disabled. You can directly SUBMIT.`;
+    }
+    // Disable other 7 columns
+    fieldsToToggle.forEach(id=>{
+      let el = document.getElementById(id);
+      if(el){
+        el.disabled = true;
+        el.classList.add('bg-gray-200','opacity-60');
+        el.classList.remove('green-tick','error-field');
+        el.value = el.tagName === 'SELECT' ? '' : el.value; // keep mobile maybe? clear
+        // remove required visual
+        let tick = document.getElementById('tick_'+id);
+        if(tick) tick.classList.add('hidden');
+      }
+    });
+    // Also disable location button
+    let locBtn = document.querySelector('button[onclick="getLocation()"]');
+    if(locBtn){ locBtn.disabled = true; locBtn.classList.add('opacity-50'); }
+    
+    // Enable submit button
+    let submitBtn = document.getElementById('submitBtn');
+    if(submitBtn){
+      submitBtn.disabled = false;
+      submitBtn.textContent = '✅ SUBMIT';
+      submitBtn.classList.remove('bg-gray-400');
+      submitBtn.classList.add('bg-green-600');
+    }
+    // Update form stat
+    let d = document.getElementById('formStat');
+    if(d){
+      d.textContent = '✅ READY - Short/Incomplete Address - Other 7 fields disabled - Can Submit';
+      d.className = 'mt-2 p-2 rounded text-center font-bold text-xs bg-orange-100 text-orange-700 border-2 border-orange-500';
+    }
+  } else {
+    // Enable back
+    if(msgDiv) msgDiv.classList.add('hidden');
+    fieldsToToggle.forEach(id=>{
+      let el = document.getElementById(id);
+      if(el){
+        el.disabled = false;
+        el.classList.remove('bg-gray-200','opacity-60');
+      }
+    });
+    let locBtn = document.querySelector('button[onclick="getLocation()"]');
+    if(locBtn){ locBtn.disabled = false; locBtn.classList.remove('opacity-50'); }
+    // re-check form
+    checkForm();
+  }
+  checkForm();
+}
+
+// Override checkForm to allow difficult territory submit
+const originalCheckForm = checkForm;
+
 function checkForm(){
+  let statusVal = document.getElementById('status').value;
+  let addrIncomplete = typeof isAddressIncomplete === 'function' ? isAddressIncomplete() : false;
+  let difficultStatuses = ['Incomplete Address','Short Address','Wrong Region Outside Boundaries'];
+  let isDifficult = difficultStatuses.includes(statusVal) || addrIncomplete;
+  if(isDifficult){
+    // In difficult mode, only STATUS is required
+    let d=document.getElementById('formStat');
+    if(d){
+      d.textContent='✅ READY - Can Submit';
+      d.className='mt-2 p-2 rounded text-center font-bold text-xs bg-green-100 text-green-700 border-2 border-green-500';
+    }
+    let submitBtn = document.getElementById('submitBtn');
+    if(submitBtn && !document.getElementById('alreadyMsg')?.offsetParent){
+      submitBtn.disabled = false;
+      submitBtn.textContent='✅ SUBMIT';
+    }
+    return true;
+  }
   let fields = [
     {id:'status', tick:'tick_status'},
     {id:'teacherApproached', tick:'tick_teacherApproached'},
@@ -453,16 +549,24 @@ async function submitOnline(){
   let tName=document.getElementById('teacherSelect').value;
   if(!tName){ alert('Select Your Name'); return; }
   if(!curSR){ alert('Search SR'); return; }
+  let statusValCheck = document.getElementById('status').value;
+  let difficultStatusesCheck = ['Incomplete Address','Short Address','Wrong Region Outside Boundaries'];
+  let addrText = document.getElementById('address').textContent || '';
+  let isAddrShort = addrText.trim().length < 30 || addrText.trim().split(/\s+/).length < 4;
+  let isDifficultCheck = difficultStatusesCheck.includes(statusValCheck) || isAddrShort;
+  
   let validationErrors=[];
   if(!document.getElementById('status').value) validationErrors.push('STATUS');
-  if(!document.getElementById('teacherApproached').value) validationErrors.push('TEACHER APPROACHED');
-  if(!document.getElementById('personContacted').value) validationErrors.push('PERSON CONTACTED');
-  if(!document.getElementById('castVote').value) validationErrors.push('CAST VOTE');
-  if(!document.getElementById('conveyance').value) validationErrors.push('CONVEYANCE REQUIRED');
-  if(!document.getElementById('locationPic').value) validationErrors.push('LOCATION PIC TAKEN');
-  if(document.getElementById('mobileNo').value.length!=10) validationErrors.push('MOBILE NO 10 digits');
-  if(!curLat || !curLng) validationErrors.push('LOCATION');
-  if(!document.getElementById('contactDate').value) validationErrors.push('DATE');
+  if(!isDifficultCheck){
+    if(!document.getElementById('teacherApproached').value) validationErrors.push('TEACHER APPROACHED');
+    if(!document.getElementById('personContacted').value) validationErrors.push('PERSON CONTACTED');
+    if(!document.getElementById('castVote').value) validationErrors.push('CAST VOTE');
+    if(!document.getElementById('conveyance').value) validationErrors.push('CONVEYANCE REQUIRED');
+    if(!document.getElementById('locationPic').value) validationErrors.push('LOCATION PIC TAKEN');
+    if(document.getElementById('mobileNo').value.length!=10) validationErrors.push('MOBILE NO 10 digits');
+    if(!curLat || !curLng) validationErrors.push('LOCATION');
+    if(!document.getElementById('contactDate').value) validationErrors.push('DATE');
+  }
   if(validationErrors.length>0){
     let msgEl=document.getElementById('validationMsg');
     msgEl.classList.remove('hidden');
